@@ -271,10 +271,10 @@ export interface GenerateInput {
   /** Override the system prompt entirely. When set, `mode` is ignored. */
   systemPrompt?: string | undefined;
   /**
-   * Generation mode for this call. Only `'create'` is supported here.
-   * Use `applyComment()` for `'revise'`; `'tweak'` has no public entry point yet.
+   * Built-in generation supports create and explicit native HTML revise.
+   * Legacy revisions use applyComment(); tweak has no public entry point yet.
    */
-  mode?: Extract<PromptComposeOptions['mode'], 'create'> | undefined;
+  mode?: Extract<PromptComposeOptions['mode'], 'create' | 'revise'> | undefined;
   signal?: AbortSignal | undefined;
   onRetry?: ((info: RetryReason) => void) | undefined;
   logger?: CoreLogger | undefined;
@@ -287,6 +287,10 @@ export interface GenerateInput {
    */
   readWorkspaceFiles?:
     | ((patterns?: string[]) => Promise<Array<{ file: string; contents: string }>>)
+    | undefined;
+  /** Literal, bounded source read for native tweaks; never interprets file names as globs. */
+  readWorkspaceFile?:
+    | ((file: string) => Promise<{ file: string; contents: string } | null>)
     | undefined;
   /**
    * Optional host-injected preview executor. When provided, the agent gets
@@ -304,6 +308,7 @@ export interface GenerateInput {
 }
 
 export interface ApplyCommentInput {
+  source?: SourceIdentityV1 | undefined;
   artifactSource: string;
   comment: string;
   selection: SelectedElement;
@@ -523,8 +528,10 @@ export async function applyComment(
 
   log.info('[apply_comment] step=build_request', ctx);
   const buildStart = Date.now();
-  const systemPrompt = composeSystemPrompt({ mode: 'revise' });
+  const native = input.source?.runtimeMode === 'native-html';
+  const systemPrompt = native ? undefined : composeSystemPrompt({ mode: 'revise' });
   const userPrompt = buildApplyCommentUserPrompt({
+    source: input.source,
     comment: input.comment,
     selection: input.selection,
   });
@@ -536,6 +543,8 @@ export async function applyComment(
   const agentInput: GenerateInput = {
     prompt: userPrompt,
     systemPrompt,
+    source: input.source,
+    ...(native ? { mode: 'revise' as const } : {}),
     history: [],
     model: input.model,
     apiKey: input.apiKey,

@@ -195,6 +195,8 @@ import {
   type AskInput,
   type AskResult,
   generateViaAgent,
+  loadDesignSkills,
+  loadFrameTemplates,
   makeAskTool,
   makeTextEditorTool,
   type RunPreviewOptions,
@@ -302,6 +304,42 @@ describe('generate IPC workspace rename coordination', () => {
       createdAt: new Date().toISOString(),
     });
 
+    it('provides a literal native source reader without interpreting filename glob characters', async () => {
+      const f = await setup();
+      await mkdir(path.join(defaultWorkspaceRoot, 'pages'));
+      const file = 'pages/[z-a].htm';
+      const contents = '<main>Literal file</main>';
+      await writeFile(path.join(defaultWorkspaceRoot, file), contents);
+      vi.mocked(generateViaAgent).mockImplementationOnce(async (input) => {
+        expect(await input.readWorkspaceFile?.(file)).toEqual({ file, contents });
+        return { message: 'Read.', artifacts: [], inputTokens: 0, outputTokens: 0, costUsd: 0 };
+      });
+      await getHandler('codesign:v1:generate')(null, f.payload);
+    });
+    it('omits bundled JSX loaders but preserves actual workspace frames and skills', async () => {
+      const f = await setup();
+      await mkdir(path.join(defaultWorkspaceRoot, 'frames'));
+      await mkdir(path.join(defaultWorkspaceRoot, 'skills'));
+      await writeFile(path.join(defaultWorkspaceRoot, 'frames/iphone.jsx'), 'authored frame');
+      await writeFile(path.join(defaultWorkspaceRoot, 'skills/chart.jsx'), 'authored skill');
+      vi.mocked(generateViaAgent).mockImplementationOnce(async (_input, deps) => {
+        expect(loadFrameTemplates).not.toHaveBeenCalled();
+        expect(loadDesignSkills).not.toHaveBeenCalled();
+        expect(deps?.fs?.view('frames/iphone.jsx')?.content).toBe('authored frame');
+        expect(deps?.fs?.view('skills/chart.jsx')?.content).toBe('authored skill');
+        return {
+          message: 'Discussed.',
+          artifacts: [],
+          inputTokens: 0,
+          outputTokens: 0,
+          costUsd: 0,
+        };
+      });
+      await getHandler('codesign:v1:generate')(null, f.payload);
+      expect(await readFile(path.join(defaultWorkspaceRoot, 'frames/iphone.jsx'), 'utf8')).toBe(
+        'authored frame',
+      );
+    });
     it('ignores renderer source and admits missing planned index.html without App.jsx seeding', async () => {
       const f = await setup();
       vi.mocked(generateViaAgent).mockImplementationOnce(async (input, deps) => {
@@ -416,6 +454,8 @@ describe('generate IPC workspace rename coordination', () => {
       await writeFile(path.join(defaultWorkspaceRoot, 'index.html'), content);
       vi.mocked(generateViaAgent).mockImplementationOnce(async (input, deps) => {
         expect(input.prompt).toContain('`index.html`');
+        expect(input.mode).toBe('revise');
+        expect(input.systemPrompt).toBeUndefined();
         expect(deps?.fs?.view('index.html')?.content).toBe(content);
         expect(deps?.fs?.view('App.jsx')).toBeNull();
         return {

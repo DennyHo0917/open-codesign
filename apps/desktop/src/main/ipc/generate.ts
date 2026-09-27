@@ -92,7 +92,11 @@ import { withTlsBypass } from '../tls-override';
 import { createResearchHost, createWebResearchAuthorization } from '../web-research';
 import { createWebResearchNetwork } from '../web-research-network';
 import { withStableWorkspacePath } from '../workspace-path-lock';
-import { listWorkspaceFilesAt, readWorkspaceFilesAt } from '../workspace-reader';
+import {
+  listWorkspaceFilesAt,
+  readWorkspaceFileAt,
+  readWorkspaceFilesAt,
+} from '../workspace-reader';
 import { finalAssistantTextForTurn } from './assistant-text';
 import { allocateAssetPath, createRuntimeTextEditorFs, resolveLocalAssetRefs } from './runtime-fs';
 import { summarizeToolResultForStream, toolExecutionStatusForStream } from './tool-log';
@@ -745,8 +749,12 @@ export function registerGenerateIpc({ db, getMainWindow }: RegisterGenerateIpcDe
     const currentWorkspaceRoot = () => sourceContext.workspaceRoot;
     const withWorkspace = sourceContext.withWorkspace;
     const [frames, designSkills, initialWorkspaceFiles] = await Promise.all([
-      loadFrameTemplates(path_module.join(templatesRoot, 'frames')),
-      loadDesignSkills(path_module.join(templatesRoot, 'design-skills')),
+      sourceContext.source?.runtimeMode === 'native-html'
+        ? []
+        : loadFrameTemplates(path_module.join(templatesRoot, 'frames')),
+      sourceContext.source?.runtimeMode === 'native-html'
+        ? []
+        : loadDesignSkills(path_module.join(templatesRoot, 'design-skills')),
       withWorkspace(async (root, resolved) => {
         const files = await readWorkspaceFilesAt(root);
         if (
@@ -935,6 +943,11 @@ export function registerGenerateIpc({ db, getMainWindow }: RegisterGenerateIpcDe
           }),
         readWorkspaceFiles: (patterns) =>
           withWorkspace((root) => readWorkspaceFilesAt(root, patterns)),
+        readWorkspaceFile: (file) =>
+          withWorkspace(async (root) => {
+            const result = await readWorkspaceFileAt(root, file);
+            return { file: result.path, contents: result.content };
+          }),
         runPreview: (options) =>
           withWorkspace((root) =>
             runPreview({
@@ -1743,7 +1756,8 @@ export function registerGenerateIpc({ db, getMainWindow }: RegisterGenerateIpcDe
             baseUrl: baseUrl ?? '<default>',
           });
 
-          const systemPrompt = composeSystemPrompt({ mode: 'revise' });
+          const native = sourceRun(id).source?.runtimeMode === 'native-html';
+          const systemPrompt = native ? undefined : composeSystemPrompt({ mode: 'revise' });
           const userPrompt = buildApplyCommentUserPrompt({
             source: sourceRun(id).source,
             comment: payload.comment,
@@ -1758,6 +1772,7 @@ export function registerGenerateIpc({ db, getMainWindow }: RegisterGenerateIpcDe
                 {
                   prompt: userPrompt,
                   systemPrompt,
+                  ...(native ? { mode: 'revise' as const } : {}),
                   history: [],
                   model: active.model,
                   apiKey,

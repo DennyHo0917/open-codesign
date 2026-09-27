@@ -44,7 +44,7 @@ import {
   shouldForceClaudeCodeIdentity,
   withBackoff,
 } from '@open-codesign/providers';
-import type { ResearchHost } from '@open-codesign/shared';
+import type { ResearchHost, SourceIdentityV1 } from '@open-codesign/shared';
 import {
   type ChatMessage,
   CodesignError,
@@ -61,6 +61,7 @@ import {
 } from '@open-codesign/shared';
 import type { TSchema } from '@sinclair/typebox';
 import type { ActiveRunMessages } from './active-messages.js';
+import { authoringProfileFor } from './authoring-profile.js';
 import { buildTransformContext } from './context-prune.js';
 import { remapProviderError } from './errors.js';
 import type { GenerateInput, GenerateOutput } from './index.js';
@@ -498,6 +499,7 @@ function attachmentImagesForModel(input: GenerateInput, model: PiModel): PiAiIma
 }
 
 function agenticToolGuidance(input: {
+  source?: SourceIdentityV1 | undefined;
   inspectWorkspace: boolean;
   featureProfile: PromptFeatureProfile;
   currentDesignName?: string | undefined;
@@ -519,7 +521,12 @@ function agenticToolGuidance(input: {
           '- When the brief includes workspace files or references, call `inspect_workspace` before editing, then read the relevant files.',
         ]
       : []),
-    `- Write the primary visual design source to \`${DEFAULT_SOURCE_ENTRY}\` using \`str_replace_based_edit_tool\`; document-only outputs need no visual shell.`,
+    `- Write the primary visual design source to \`${input.source?.path ?? DEFAULT_SOURCE_ENTRY}\` using \`str_replace_based_edit_tool\`; document-only outputs need no visual shell.`,
+    ...(authoringProfileFor(input.source) === 'native-html'
+      ? [
+          '- Native controls need authored bindings and CSS fallbacks. `tweaks()` discovers declarations only; no injected bridge or live host-panel synchronization is promised.',
+        ]
+      : []),
     '- Use `create` for new files; follow-up edits use `view`, `str_replace`, or `insert`.',
     '- Before editing an existing file, `view` its current contents in this run. Keep `old_str` small and unique. Successful edits need no redundant readback; inspect when subsequent work needs context.',
     tweakStep,
@@ -977,7 +984,12 @@ async function generateViaAgentInternal(
   if (initialApiKey.length === 0 && input.allowKeyless !== true) {
     throw new CodesignError('Missing API key', ERROR_CODES.PROVIDER_AUTH_MISSING);
   }
-  if (!input.systemPrompt && input.mode && input.mode !== 'create') {
+  if (
+    !input.systemPrompt &&
+    input.mode &&
+    input.mode !== 'create' &&
+    !(input.mode === 'revise' && authoringProfileFor(input.source) === 'native-html')
+  ) {
     throw new CodesignError(
       'generateViaAgent() built-in prompt only supports mode "create".',
       ERROR_CODES.INPUT_UNSUPPORTED_MODE,
@@ -1029,6 +1041,7 @@ async function generateViaAgentInternal(
         log,
         providerId: input.model.provider,
         templatesRoot: input.templatesRoot,
+        source: input.source,
       });
   const preflightTitle = isAutoDesignName(input.currentDesignName)
     ? autoTitleFromPrompt(input.prompt)
@@ -1062,7 +1075,8 @@ async function generateViaAgentInternal(
   const systemPrompt =
     input.systemPrompt ??
     composeSystemPrompt({
-      mode: 'create',
+      mode: input.mode ?? 'create',
+      source: input.source,
       userPrompt: input.prompt,
       featureProfile,
     });
@@ -1099,6 +1113,8 @@ async function generateViaAgentInternal(
     wrapSkillState(
       makeSkillTool({
         dedup: loadedSkills,
+        source: input.source,
+        providerId: input.model.provider,
         skillsRoot: skillsBuiltinDir ?? null,
         brandRefsRoot,
       }) as unknown as AgentTool<TSchema, unknown>,
@@ -1106,6 +1122,7 @@ async function generateViaAgentInternal(
     ),
   );
   const scaffoldTool = makeScaffoldTool(getWorkspaceRoot, () => scaffoldsRoot, {
+    source: input.source,
     onScaffolded: async (details) => {
       mutatedPaths.add(details.destPath);
       await input.onScaffolded?.(details);
@@ -1131,7 +1148,10 @@ async function generateViaAgentInternal(
     defaultToolsByName.set(
       'str_replace_based_edit_tool',
       wrapPlanningGate(
-        makeTextEditorTool(trackedFs) as unknown as AgentTool<TSchema, unknown>,
+        makeTextEditorTool(trackedFs, { source: input.source }) as unknown as AgentTool<
+          TSchema,
+          unknown
+        >,
         runProtocolState,
         { allowBeforeTodos: isTextEditorView },
       ),
@@ -1226,7 +1246,10 @@ async function generateViaAgentInternal(
     defaultToolsByName.set(
       'tweaks',
       wrapPlanningGate(
-        makeTweaksTool(input.readWorkspaceFiles) as unknown as AgentTool<TSchema, unknown>,
+        makeTweaksTool(input.readWorkspaceFiles, {
+          source: input.source,
+          readWorkspaceFile: input.readWorkspaceFile,
+        }) as unknown as AgentTool<TSchema, unknown>,
         runProtocolState,
       ),
     );
@@ -1266,6 +1289,7 @@ async function generateViaAgentInternal(
   const baseAgenticGuidance =
     researchGuidance +
     agenticToolGuidance({
+      source: input.source,
       inspectWorkspace: input.inspectWorkspace !== undefined,
       featureProfile,
       currentDesignName: promptInput.currentDesignName,
