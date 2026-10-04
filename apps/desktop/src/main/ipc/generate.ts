@@ -44,6 +44,7 @@ import {
   armGenerationTimeout,
   cancelGenerationRequest,
   extractGenerationTimeoutError,
+  generationRequestTimeoutMs,
   listInFlightGenerations,
   withInFlightGenerationForDesign,
 } from '../generation-ipc';
@@ -733,6 +734,9 @@ export function registerGenerateIpc({ db, getMainWindow }: RegisterGenerateIpcDe
     const toolStartedAt = new Map<string, number>();
     const templatesRoot = path_module.join(app.getPath('userData'), 'templates');
     const currentWorkspaceRoot = () => requireWorkspaceRootForDesign(designId).workspaceRoot;
+    const requestTimeoutMs = generationRequestTimeoutMs(
+      (await readPreferences()).generationTimeoutSec,
+    );
     const [frames, designSkills, initialWorkspaceFiles] = await Promise.all([
       loadFrameTemplates(path_module.join(templatesRoot, 'frames')),
       loadDesignSkills(path_module.join(templatesRoot, 'design-skills')),
@@ -831,6 +835,7 @@ export function registerGenerateIpc({ db, getMainWindow }: RegisterGenerateIpcDe
         const judgeOpts: Parameters<typeof complete>[2] = {
           apiKey: input.apiKey ?? '',
           maxTokens,
+          timeoutMs: requestTimeoutMs,
           userImages,
           ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
           ...(input.wire ? { wire: input.wire } : {}),
@@ -863,6 +868,7 @@ export function registerGenerateIpc({ db, getMainWindow }: RegisterGenerateIpcDe
     return generateViaAgent(
       {
         ...input,
+        requestTimeoutMs,
         templatesRoot,
         askBridge: (askInput, signal) =>
           requestAsk(id, askInput, () => getMainWindow(), {
