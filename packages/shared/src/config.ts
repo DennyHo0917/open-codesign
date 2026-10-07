@@ -288,6 +288,7 @@ export const BUILTIN_PROVIDERS: Readonly<Record<SupportedOnboardingProvider, Pro
     id: 'api-route',
     name: 'API Route',
     builtin: true,
+    requiresApiKey: true,
     wire: 'openai-chat',
     baseUrl: 'https://global.api-route.com/v1',
     envKey: 'API_ROUTE_API_KEY',
