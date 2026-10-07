@@ -106,18 +106,12 @@ describe.skipIf(!chrome)('API Route renderer save flow in system Chrome', () => 
         ),
       );
       await clickButton('Add provider');
-      await page.waitForFunction(() =>
-        document.body.textContent?.includes('https://www.api-route.com/tokens'),
-      );
-      const menuText = await page.$eval('body', (node) => node.textContent);
-      expect(menuText).toContain(PROVIDER_SHORTLIST['api-route'].label);
-      expect(menuText).toContain(PROVIDER_SHORTLIST['api-route'].keyHelpUrl);
-      for (const button of await page.$$('button')) {
-        if (
-          (await button.evaluate((node) => node.textContent))?.includes(
-            PROVIDER_SHORTLIST['api-route'].keyHelpUrl,
-          )
-        ) {
+      await page.waitForSelector('[role="menuitem"]');
+      for (const button of await page.$$('[role="menuitem"]')) {
+        const label = await button.$eval('span', (node) => node.textContent?.trim());
+        if (label === PROVIDER_SHORTLIST['api-route'].label) {
+          const helpUrl = await button.$eval('span:last-child', (node) => node.textContent?.trim());
+          expect(helpUrl).toBe(PROVIDER_SHORTLIST['api-route'].keyHelpUrl);
           await button.click();
           break;
         }
