@@ -162,8 +162,9 @@ export function AddCustomProviderModal({
   );
   const [apiKey, setApiKey] = useState('');
   const [requiresApiKey, setRequiresApiKey] = useState(
-    (editTarget?.requiresApiKey ?? builtinPreset?.requiresApiKey ?? initialValues?.requiresApiKey) !==
-      false,
+    (editTarget?.requiresApiKey ??
+      builtinPreset?.requiresApiKey ??
+      initialValues?.requiresApiKey) !== false,
   );
   const [defaultModel, setDefaultModel] = useState(
     editTarget?.defaultModel ?? builtinPreset?.defaultModel ?? initialValues?.defaultModel ?? '',
